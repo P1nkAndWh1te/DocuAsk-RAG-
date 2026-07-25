@@ -15,7 +15,7 @@ Streamlit UI + FastAPI backend + file upload + reusable RAG services + Chroma pe
 - 本地文档问答需要来源可追溯。
 - 检索质量需要可量化评估。
 - RAG 核心逻辑需要从页面中拆出，便于复用和测试。
-- 问答流程需要具备 intent routing、tool selection、trace 和拒答边界。
+- 问答流程需要具备 intent routing、tool selection、trace、轻量多轮上下文和拒答边界。
 
 ## 模块结构
 
@@ -110,6 +110,7 @@ flowchart TD
 | `POST /qa` | 对已入库 collection 执行 Top-k 检索 |
 | `POST /answer` | 检索 chunks 后调用 LLM 生成 answer 和 sources |
 | `POST /agent/ask` | 执行 Agentic RAG：intent、tool selection、trace、fallback/refusal |
+| `POST /agent/evaluation` | 评估 Agentic 行为：intent、工具选择、拒答和来源引用 |
 | `POST /evaluation` | 用固定问题集评估检索模式，并记录 failure cases |
 
 `POST /evaluation` 默认使用 FAQ 15 题，也支持传入自定义 `evaluation_cases`，用于不同文档配置不同问题集。
@@ -132,7 +133,20 @@ question -> classify_intent -> choose tools -> retrieve / scan / rerank -> answe
 | `metadata_query` | 查询来源、chunk、引用信息 |
 | `out_of_scope` | 文档外问题，触发拒答 |
 
-`/agent/ask` 返回 `selected_tools`、`trace`、`confidence` 和 `fallback_reason`，用于解释系统为什么检索、为什么拒答或为什么使用上下文答案。
+`/agent/ask` 返回 `selected_tools`、`trace`、`confidence`、`fallback_reason` 和 `effective_question`，用于解释系统为什么检索、为什么拒答、为什么使用上下文答案，以及追问如何被重写。
+
+## Agent Evaluation
+
+`/agent/evaluation` 用固定 5 题检查 Agentic 行为：
+
+| Metric | 说明 |
+|---|---|
+| `intent_accuracy` | intent 是否判断正确 |
+| `tool_selection_accuracy` | 自动选择的检索/扫描工具是否符合预期 |
+| `refusal_accuracy` | 文档外问题是否正确拒答 |
+| `source_citation_rate` | 可回答问题是否返回来源 |
+
+当前 FAQ 样例下四项指标均为 `1.0`。该结果只代表当前小样本评测，用于回归测试和展示系统行为，不代表生产环境泛化能力。
 
 ## 检索模式
 
@@ -186,13 +200,13 @@ uploaded_document_chunks_bge_v3_xxxxxxxxxxxx
 当前测试目标不是测试 DeepSeek 生成，而是稳定验证本地检索链路：
 
 ```text
-文档入库 -> collection 查询 -> 检索模式切换 -> Agentic ask -> 固定问题评测 -> 错误分支
+文档入库 -> collection 查询 -> 检索模式切换 -> Agentic ask -> Agent evaluation -> 固定问题评测 -> 错误分支
 ```
 
 当前评测能力包括：
 
 ```text
-默认 FAQ 评测 + 自定义 evaluation cases + 多文档小样本评测 + failure cases
+默认 FAQ 评测 + Agent evaluation + 自定义 evaluation cases + 多文档小样本评测 + failure cases
 ```
 
 原因：
@@ -216,7 +230,7 @@ uploaded_document_chunks_bge_v3_xxxxxxxxxxxx
 更准确的当前表述：
 
 ```text
-DocuAsk 已完成本地 `.txt/.md/.pdf/.docx` 文件上传、切分、向量入库、四种检索模式、Agentic RAG intent routing、tool selection、trace、拒答、来源上下文展示、LLM answer 生成、failure cases 和固定问题检索评测。
+DocuAsk 已完成本地 `.txt/.md/.pdf/.docx` 文件上传、切分、向量入库、四种检索模式、Agentic RAG intent routing、tool selection、trace、轻量多轮上下文、拒答、Agent evaluation、来源上下文展示、LLM answer 生成、failure cases 和固定问题检索评测。
 ```
 
 ## 下一步

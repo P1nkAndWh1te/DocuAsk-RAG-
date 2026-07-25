@@ -2,7 +2,12 @@ from fastapi import FastAPI, File, Form, UploadFile
 from openai import OpenAIError, RateLimitError
 from pydantic import BaseModel, Field
 
-from backend.services.agent import AGENT_RETRIEVAL_MODES, run_agentic_rag
+from backend.services.agent import (
+    AGENT_EVALUATION_CASES,
+    AGENT_RETRIEVAL_MODES,
+    evaluate_agentic_rag,
+    run_agentic_rag,
+)
 from backend.services.bm25 import retrieve_relevant_chunks_bm25
 from backend.services.chunking import split_text_into_chunks
 from backend.services.document_parser import (
@@ -101,6 +106,7 @@ class AgentRequest(BaseModel):
     top_k: int = Field(default=3, ge=1, le=10)
     retrieval_mode: str = "auto"
     use_llm: bool = True
+    conversation_history: list[dict] = Field(default_factory=list)
 
 
 class AgentTraceStep(BaseModel):
@@ -108,10 +114,12 @@ class AgentTraceStep(BaseModel):
     tool: str = ""
     result: str
     details: str = ""
+    reason: str = ""
 
 
 class AgentResponse(BaseModel):
     question: str
+    effective_question: str
     intent: str
     embedding_mode: str
     collection_name: str
@@ -125,6 +133,50 @@ class AgentResponse(BaseModel):
     trace: list[AgentTraceStep]
     confidence: str
     fallback_reason: str
+
+
+class AgentEvaluationCase(BaseModel):
+    question: str = Field(..., min_length=1)
+    expected_intent: str = Field(..., min_length=1)
+    expected_retrieval_mode: str = Field(..., min_length=1)
+    should_refuse: bool
+
+
+class AgentEvaluationRequest(BaseModel):
+    text: str = Field(..., min_length=1)
+    embedding_mode: str = KEYWORD_EMBEDDING_MODE
+    chunk_size: int = DEFAULT_CHUNK_SIZE
+    chunk_overlap: int = DEFAULT_CHUNK_OVERLAP
+    top_k: int = Field(default=3, ge=1, le=10)
+    evaluation_cases: list[AgentEvaluationCase] | None = None
+
+
+class AgentEvaluationRow(BaseModel):
+    question: str
+    expected_intent: str
+    actual_intent: str
+    intent_hit: bool
+    expected_retrieval_mode: str
+    actual_retrieval_mode: str
+    tool_hit: bool
+    should_refuse: bool
+    refused: bool
+    refusal_hit: bool
+    has_sources: bool
+    fallback_reason: str
+    trace_steps: str
+
+
+class AgentEvaluationResponse(BaseModel):
+    embedding_mode: str
+    chunk_count: int
+    case_count: int
+    intent_accuracy: float
+    tool_selection_accuracy: float
+    refusal_accuracy: float
+    source_citation_rate: float
+    rows: list[AgentEvaluationRow]
+    failure_cases: list[AgentEvaluationRow]
 
 
 class EvaluationCase(BaseModel):
@@ -351,6 +403,7 @@ def ask_agent(request: AgentRequest) -> AgentResponse:
             top_k=request.top_k,
             retrieval_mode=request.retrieval_mode,
             use_llm=request.use_llm,
+            conversation_history=request.conversation_history,
         )
     except RateLimitError as exc:
         raise_http_error(429, ErrorCode.LLM_RATE_LIMIT, "LLM quota or rate limit failed")
@@ -359,6 +412,7 @@ def ask_agent(request: AgentRequest) -> AgentResponse:
 
     return AgentResponse(
         question=result["question"],
+        effective_question=result["effective_question"],
         intent=result["intent"],
         embedding_mode=request.embedding_mode,
         collection_name=request.collection_name,
@@ -383,6 +437,48 @@ def ask_agent(request: AgentRequest) -> AgentResponse:
         trace=[AgentTraceStep(**item) for item in result["trace"]],
         confidence=result["confidence"],
         fallback_reason=result["fallback_reason"],
+    )
+
+
+@app.post("/agent/evaluation", response_model=AgentEvaluationResponse)
+def evaluate_agent(request: AgentEvaluationRequest) -> AgentEvaluationResponse:
+    if request.embedding_mode not in COLLECTION_NAMES:
+        raise_http_error(400, ErrorCode.UNSUPPORTED_EMBEDDING_MODE, "unsupported embedding mode")
+
+    try:
+        chunks = split_text_into_chunks(
+            request.text,
+            chunk_size=request.chunk_size,
+            chunk_overlap=request.chunk_overlap,
+        )
+    except ValueError as exc:
+        raise_http_error(400, ErrorCode.INVALID_CHUNKING_CONFIG, str(exc))
+
+    if not chunks:
+        raise_http_error(400, ErrorCode.EMPTY_DOCUMENT, "document text is empty")
+
+    evaluation_cases = (
+        [case.model_dump() for case in request.evaluation_cases]
+        if request.evaluation_cases is not None
+        else AGENT_EVALUATION_CASES
+    )
+    result = evaluate_agentic_rag(
+        evaluation_cases=evaluation_cases,
+        chunks=chunks,
+        embedding_mode=request.embedding_mode,
+        top_k=request.top_k,
+    )
+
+    return AgentEvaluationResponse(
+        embedding_mode=request.embedding_mode,
+        chunk_count=len(chunks),
+        case_count=result["case_count"],
+        intent_accuracy=result["intent_accuracy"],
+        tool_selection_accuracy=result["tool_selection_accuracy"],
+        refusal_accuracy=result["refusal_accuracy"],
+        source_citation_rate=result["source_citation_rate"],
+        rows=[AgentEvaluationRow(**row) for row in result["rows"]],
+        failure_cases=[AgentEvaluationRow(**row) for row in result["failure_cases"]],
     )
 
 

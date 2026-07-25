@@ -10,7 +10,12 @@ if str(APP_ROOT) not in sys.path:
     sys.path.insert(0, str(APP_ROOT))
 
 from backend.services.chunking import split_text_into_chunks
-from backend.services.agent import AGENT_RETRIEVAL_MODES, run_agentic_rag
+from backend.services.agent import (
+    AGENT_EVALUATION_CASES,
+    AGENT_RETRIEVAL_MODES,
+    evaluate_agentic_rag,
+    run_agentic_rag,
+)
 from backend.services.document_parser import parse_uploaded_document
 from backend.services.embeddings import (
     BGE_EMBEDDING_MODE,
@@ -46,9 +51,11 @@ def read_uploaded_text(uploaded_file) -> tuple[str, str]:
 
 def main() -> None:
     st.set_page_config(page_title="RAG QA System", page_icon="RAG", layout="wide")
+    if "conversation_history" not in st.session_state:
+        st.session_state.conversation_history = []
 
-    st.title("RAG QA System")
-    st.caption("Local document QA with retrieval evaluation and source citations")
+    st.title("DocuAsk Agentic RAG")
+    st.caption("Local document QA with intent routing, tool selection, evaluation, and source citations")
 
     embedding_mode = st.sidebar.radio(
         "Embedding mode",
@@ -150,6 +157,23 @@ def main() -> None:
         metric_columns[1].metric("Top-k recall", f"{top_k_hit_rate:.0%}")
         st.dataframe(evaluation_rows, use_container_width=True, hide_index=True)
 
+        st.subheader("Agent evaluation")
+        st.caption(
+            "Run fixed agent cases to inspect intent routing, tool selection, refusal, and source citation."
+        )
+        agent_evaluation = evaluate_agentic_rag(
+            AGENT_EVALUATION_CASES,
+            chunks,
+            embedding_mode=embedding_mode,
+            top_k=TOP_K,
+        )
+        agent_metric_columns = st.columns(4)
+        agent_metric_columns[0].metric("Intent accuracy", f"{agent_evaluation['intent_accuracy']:.0%}")
+        agent_metric_columns[1].metric("Tool accuracy", f"{agent_evaluation['tool_selection_accuracy']:.0%}")
+        agent_metric_columns[2].metric("Refusal accuracy", f"{agent_evaluation['refusal_accuracy']:.0%}")
+        agent_metric_columns[3].metric("Source rate", f"{agent_evaluation['source_citation_rate']:.0%}")
+        st.dataframe(agent_evaluation["rows"], use_container_width=True, hide_index=True)
+
     question = st.text_area(
         "Question",
         placeholder="Ask a question about the uploaded document.",
@@ -181,6 +205,7 @@ def main() -> None:
                     embedding_mode=embedding_mode,
                     retrieval_mode=agent_retrieval_mode,
                     use_llm=True,
+                    conversation_history=st.session_state.conversation_history,
                 )
             except RateLimitError as exc:
                 st.error("DeepSeek request reached the server, but quota or rate limit failed.")
@@ -192,6 +217,9 @@ def main() -> None:
                 return
 
             st.write(agent_result["final_answer"])
+            if agent_result["effective_question"] != agent_result["question"]:
+                st.caption(f"Effective question: {agent_result['effective_question']}")
+
             metric_columns = st.columns(3)
             metric_columns[0].metric("Intent", agent_result["intent"])
             metric_columns[1].metric("Retrieval", agent_result["retrieval_mode"])
@@ -205,6 +233,24 @@ def main() -> None:
 
             st.subheader("Agent trace")
             st.dataframe(agent_result["trace"], use_container_width=True, hide_index=True)
+
+            st.session_state.conversation_history.append(
+                {
+                    "question": question,
+                    "answer": agent_result["final_answer"],
+                    "intent": agent_result["intent"],
+                    "sources": agent_result["sources"],
+                }
+            )
+            st.session_state.conversation_history = st.session_state.conversation_history[-3:]
+
+            if st.session_state.conversation_history:
+                with st.expander("Conversation history"):
+                    st.dataframe(
+                        st.session_state.conversation_history,
+                        use_container_width=True,
+                        hide_index=True,
+                    )
 
             st.subheader("Retrieved chunks")
             for rank, item in enumerate(agent_result["retrieved_chunks"], start=1):

@@ -15,8 +15,10 @@ The application uses Streamlit for the UI, FastAPI for reusable backend endpoint
 - Store document chunks in a local Chroma persistent collection.
 - Retrieve chunks with vector search, BM25, RRF ranking fusion, or a local rerank stage.
 - Route questions through Agentic RAG intent classification, tool selection, trace logging, and fallback/refusal logic.
+- Support lightweight conversation history for follow-up questions.
 - Generate grounded answers with source chunk citations.
 - Evaluate retrieval quality with Top-1 hit and Top-k recall.
+- Evaluate Agentic behavior with intent accuracy, tool selection accuracy, refusal accuracy, and source citation rate.
 - Expose reusable FastAPI endpoints for ingestion, QA, answer generation, and evaluation.
 - Record retrieval failure cases during evaluation.
 - Cover core API behavior, document parsing, retrieval metrics, and error branches with pytest.
@@ -142,6 +144,15 @@ Vector retrieval: Top-1 73.3%, Top-k 100%
 BM25 retrieval: Top-1 86.7%, Top-k 93.3%
 RRF retrieval: Top-1 80%, Top-k 93.3%
 Rerank retrieval: Top-1 86.7%, Top-k 100%
+```
+
+Agentic RAG reliability checks:
+
+```text
+Intent accuracy: 100%
+Tool selection accuracy: 100%
+Refusal accuracy: 100%
+Source citation rate: 100%
 ```
 
 ## 当前限制

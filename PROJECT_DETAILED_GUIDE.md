@@ -405,7 +405,16 @@ classify_intent -> select_tools -> retrieve / scan / rerank -> answer / refuse -
 | `metadata_query` | 查询来源、chunk、引用信息 |
 | `out_of_scope` | 文档外问题，触发拒答 |
 
-Agent 会返回 `selected_tools`、`trace`、`confidence` 和 `fallback_reason`。这样用户不只看到最终回答，还能看到系统为什么选择某种检索方式、为什么使用上下文回答，或为什么拒答。
+Agent 会返回 `selected_tools`、`trace`、`confidence`、`fallback_reason` 和 `effective_question`。这样用户不只看到最终回答，还能看到系统为什么选择某种检索方式、为什么使用上下文回答、为什么拒答，以及追问如何结合上一轮问题被改写。
+
+阶段二还增加了 Agent evaluation，用于检查：
+
+- intent 是否判断正确。
+- retrieval / scan / rerank 工具是否选对。
+- 文档外问题是否拒答。
+- 可回答问题是否带来源。
+
+当前默认小样本评测下，`intent_accuracy`、`tool_selection_accuracy`、`refusal_accuracy` 和 `source_citation_rate` 均为 100%。这个结果用于回归测试和项目展示，不代表生产环境泛化能力。
 
 当前这个 planner 是规则型轻量 planner，优点是稳定、可测试、面试时容易解释；它还不是复杂多 Agent Runtime。
 
@@ -450,6 +459,7 @@ FastAPI 负责把 RAG 能力包装成接口。
 | `POST /qa` | 检索问答，返回 chunks 和 context |
 | `POST /answer` | 检索后调用 LLM 生成回答 |
 | `POST /agent/ask` | Agentic RAG 问答，返回 intent、tools、trace、fallback 和答案 |
+| `POST /agent/evaluation` | Agent 行为评测，返回 intent/tool/refusal/source 指标 |
 | `POST /evaluation` | 检索评测 |
 
 接口错误会返回结构化错误码，相关实现位于：
@@ -822,6 +832,8 @@ docker compose up --build
 - Agentic RAG intent routing。
 - Tool selection。
 - Agent trace。
+- Agent evaluation。
+- 轻量多轮上下文追问改写。
 - 文档外问题拒答与 fallback reason。
 - 检索上下文展示。
 - DeepSeek 生成回答。

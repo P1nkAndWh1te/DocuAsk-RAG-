@@ -26,11 +26,13 @@ DocuAsk 是一个本地文档 Agentic RAG 问答原型，用于验证 RAG 与轻
 - FastAPI multipart 文件上传接口，支持 `.txt` / `.md` / `.pdf` / `.docx`。
 - FastAPI answer 接口，支持基于检索上下文生成最终回答。
 - FastAPI `/agent/ask` 接口，支持 intent routing、tool selection、trace 和拒答边界。
+- FastAPI `/agent/evaluation` 接口，评估 intent、工具选择、拒答和来源引用。
 - 双 embedding 模式：
   - `Teaching keyword embedding`
   - `BGE Chinese embedding`
 - `vector`、`bm25`、`rrf`、`rerank` 四种检索模式。
 - Agentic RAG 模式，支持 `document_qa`、`summary`、`compare`、`metadata_query`、`out_of_scope` intent。
+- 轻量 conversation history，用于处理“它/这个/刚才”等追问。
 - DeepSeek OpenAI-compatible LLM API 生成回答。
 - 来源 chunk 展示。
 - 15 题固定检索评测。
@@ -52,6 +54,7 @@ DocuAsk 是一个本地文档 Agentic RAG 问答原型，用于验证 RAG 与轻
 | Real embedding | BAAI/bge-small-zh-v1.5 |
 | Retrieval | Vector / BM25 / RRF / Rerank |
 | Agentic layer | Intent routing / Tool selection / Trace / Fallback |
+| Agent evaluation | Intent accuracy / Tool accuracy / Refusal accuracy / Source citation rate |
 | LLM API | DeepSeek OpenAI-compatible API |
 | SDK | OpenAI Python SDK |
 | Test | pytest |
@@ -79,6 +82,15 @@ examples/rag_faq.md
 Rerank 在当前 FAQ 样例上保持 100% Top-k recall，并把 Top-1 hit 提升到 86.7%。
 failure cases 可用于继续分析排序失败原因。
 ```
+
+Agentic 行为评测：
+
+| Metric | Value |
+|---|---:|
+| Intent accuracy | 100% |
+| Tool selection accuracy | 100% |
+| Refusal accuracy | 100% |
+| Source citation rate | 100% |
 
 ## 关键工程决策
 
@@ -133,6 +145,15 @@ classify_intent -> select_tools -> retrieve / scan / rerank -> answer / refuse -
 
 这样可以稳定验证 Agent 行为，并通过 `trace` 展示每一步为什么执行。
 
+### 7. Agent evaluation 验证行为可靠性
+
+阶段二增加 `/agent/evaluation`，不只看检索命中，还检查：
+
+- intent 是否判断正确。
+- retrieval / scan / rerank 工具是否选对。
+- 文档外问题是否拒答。
+- 可回答问题是否返回来源。
+
 ## 如何运行
 
 ```powershell
@@ -160,7 +181,8 @@ python -m streamlit run app.py
 - 上传 FAQ 文档后，页面会展示文档切分结果。
 - 侧边栏可以切换 embedding 模式。
 - Retrieval evaluation 区域显示 Top-1 hit 和 Top-k recall。
-- Agentic RAG 模式下可以看到 intent、selected tools、trace、confidence、fallback reason、来源 chunk 和最终回答。
+- Agentic RAG 模式下可以看到 intent、selected tools、trace、confidence、fallback reason、effective question、来源 chunk 和最终回答。
+- Agent evaluation 区域显示 intent accuracy、tool selection accuracy、refusal accuracy 和 source citation rate。
 - BM25 和 RRF 模式可用于对比语义检索与关键词检索的排序差异。
 
 ## 当前限制

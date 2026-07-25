@@ -194,7 +194,13 @@ sources
   "embedding_mode": "Teaching keyword embedding",
   "top_k": 3,
   "retrieval_mode": "auto",
-  "use_llm": false
+  "use_llm": false,
+  "conversation_history": [
+    {
+      "question": "什么是 embedding？",
+      "answer": "Embedding 是把文本转换成向量。"
+    }
+  ]
 }
 ```
 
@@ -212,6 +218,7 @@ rerank
 
 ```text
 question
+effective_question
 intent
 embedding_mode
 collection_name
@@ -241,8 +248,58 @@ out_of_scope
 
 - `auto` 模式下，普通文档问答默认选择 `rerank`，总结类问题选择 `scan`，来源/片段类问题倾向 `bm25`。
 - `trace` 记录 `classify_intent`、`plan`、`retrieve`、`answer/refuse` 等执行步骤。
+- `conversation_history` 可用于轻量追问改写，例如把“它有什么作用？”结合上一轮问题重写成更完整的问题。
 - `use_llm=false` 时接口返回基于上下文的本地回答，便于测试和无 API Key 环境演示。
 - 文档外问题会触发拒答，返回 `fallback_reason=out_of_scope`。
+
+## POST /agent/evaluation
+
+用途：评估 Agentic RAG 行为是否可靠，不只看检索命中，还检查 intent、tool selection、refusal 和 source citation。
+
+请求体：
+
+```json
+{
+  "text": "# Python 学习 FAQ\n\n## RAG 的基本流程是什么？\nRAG 会先检索资料，再让 LLM 根据资料回答。",
+  "embedding_mode": "Teaching keyword embedding",
+  "chunk_size": 350,
+  "chunk_overlap": 50,
+  "top_k": 3
+}
+```
+
+响应字段：
+
+```text
+embedding_mode
+chunk_count
+case_count
+intent_accuracy
+tool_selection_accuracy
+refusal_accuracy
+source_citation_rate
+rows
+failure_cases
+```
+
+当前默认 Agent evaluation cases 覆盖：
+
+```text
+document_qa
+summary
+compare
+metadata_query
+out_of_scope
+```
+
+当前 FAQ 样例验证结果：
+
+| Metric | Value |
+|---|---:|
+| intent_accuracy | 1.0 |
+| tool_selection_accuracy | 1.0 |
+| refusal_accuracy | 1.0 |
+| source_citation_rate | 1.0 |
 
 ## POST /evaluation
 
@@ -319,6 +376,7 @@ failure_cases
 | `/agent/ask` 不支持的 retrieval mode | 400 |
 | `/agent/ask` 查询不存在的 collection | 404 |
 | `/agent/ask` LLM quota / request failed | 429 / 502 |
+| `/agent/evaluation` 空文档或非法 chunk 配置 | 400 |
 
 ## 自动化验证
 
@@ -336,6 +394,8 @@ POST /documents/upload: markdown upload, docx upload, unsupported file type, and
 POST /qa: vector / bm25 / rrf / rerank
 POST /answer: missing API key and unknown retrieval mode
 POST /agent/ask: intent routing, tool selection, trace, refusal, and no-key local answer
+POST /agent/ask: conversation history follow-up rewrite
+POST /agent/evaluation: intent/tool/refusal/source reliability metrics
 POST /evaluation: vector / bm25 / rrf / rerank
 POST /evaluation: custom evaluation cases
 POST /evaluation: failure cases

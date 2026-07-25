@@ -11,6 +11,7 @@ POST /documents/upload
 POST /qa
 POST /answer
 POST /agent/ask
+POST /agent/evaluation
 POST /evaluation
 services/chunking.py
 services/agent.py
@@ -160,7 +161,8 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8000/agent/ask" -Method Post -ContentTy
   "embedding_mode": "Teaching keyword embedding",
   "top_k": 3,
   "retrieval_mode": "auto",
-  "use_llm": false
+  "use_llm": false,
+  "conversation_history": []
 }'
 ```
 
@@ -177,7 +179,29 @@ confidence
 fallback_reason
 ```
 
-`use_llm=false` is useful for local tests and demos without an API key. In `auto` mode, the agent classifies the question, chooses tools, retrieves or scans chunks, and may refuse out-of-scope questions.
+`use_llm=false` is useful for local tests and demos without an API key. In `auto` mode, the agent classifies the question, chooses tools, retrieves or scans chunks, and may refuse out-of-scope questions. `conversation_history` is used for lightweight follow-up rewriting.
+
+## Evaluate Agentic RAG
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/agent/evaluation" -Method Post -ContentType "application/json" -Body '{
+  "text": "# Python 学习 FAQ\n\n## RAG 的基本流程是什么？\nRAG 会先检索资料，再让 LLM 根据资料回答。",
+  "embedding_mode": "Teaching keyword embedding",
+  "chunk_size": 350,
+  "chunk_overlap": 50,
+  "top_k": 3
+}'
+```
+
+Expected metrics:
+
+```text
+intent_accuracy
+tool_selection_accuracy
+refusal_accuracy
+source_citation_rate
+failure_cases
+```
 
 ## Test
 
@@ -195,6 +219,8 @@ POST /documents/upload markdown/docx upload, unsupported file type, and invalid 
 POST /qa with vector, bm25, rrf, and rerank retrieval modes
 POST /answer missing API key and unknown retrieval mode
 POST /agent/ask intent routing, tool selection, trace, refusal, and local no-key answer
+POST /agent/ask conversation history follow-up rewrite
+POST /agent/evaluation reliability metrics
 POST /evaluation with vector, bm25, rrf, and rerank retrieval modes
 POST /evaluation with custom evaluation cases
 failure case recording

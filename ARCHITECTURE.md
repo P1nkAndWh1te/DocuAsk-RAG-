@@ -193,7 +193,7 @@ uploaded_document_chunks_bge_v3_xxxxxxxxxxxx
 
 - 不同 embedding 维度不能混用同一个 collection。
 - schema version 可以避开历史实验数据造成的索引冲突。
-- document hash 可以让同一份文档复用已有 collection。
+- document hash 用于让同一份文档生成稳定的 collection 名称；重新入库时会重建同名 collection，避免本地 Chroma/HNSW 旧索引状态影响验证。
 
 ## 自动化测试
 

@@ -309,7 +309,7 @@ uploaded_document_chunks_bge_v3_xxxxxxxxxxxx
 
 - 不同 embedding 模式的向量维度不同，不能混用。
 - schema version 可以隔离历史索引结构。
-- 文档 hash 可以让同一份文档复用已有 collection。
+- 文档 hash 可以让同一份文档生成稳定的 collection 名称；重新入库时会重建同名 collection，避免本地 Chroma/HNSW 旧索引状态影响验证。
 
 ### 7.7 BM25
 

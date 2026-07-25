@@ -11,6 +11,10 @@ students.csv
 chroma_store/
 backend/storage/
 
+# Local learning process folders
+03_执行过程/
+04_成果输出/
+
 # Local editor files
 .vscode/
 .idea/

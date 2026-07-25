@@ -74,9 +74,6 @@ def build_chunk_collection(chunks: list[str], embedding_mode: str):
     if not embedded_chunks:
         return None
 
-    if collection.count() == len(embedded_chunks):
-        return collection
-
     if collection.count() != 0:
         client.delete_collection(collection_name)
         collection = get_chunk_collection(client, collection_name)

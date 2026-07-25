@@ -28,6 +28,8 @@ The application uses Streamlit for the UI, FastAPI for reusable backend endpoint
 
 - 项目展示说明：`PROJECT_BRIEF.md`
 - 项目详细介绍：`PROJECT_DETAILED_GUIDE.md`
+- 简历与面试摘要：`PORTFOLIO_SUMMARY.md`
+- 交付验收清单：`DELIVERY_CHECKLIST.md`
 - API 文档：`API.md`
 - 架构说明：`ARCHITECTURE.md`
 
@@ -70,6 +72,24 @@ docker compose up --build
 ```
 
 Docker uses `requirements-docker.txt` for a lighter reproducible demo path. It supports the default Teaching keyword embedding mode. For BGE mode inside Docker, install the full `requirements.txt` dependencies because BGE requires `sentence-transformers`.
+
+## 验证方式
+
+```powershell
+python -m pytest -q
+```
+
+也可以运行：
+
+```powershell
+.\scripts\validate.ps1
+```
+
+当前验证结果：
+
+```text
+32 passed, 1 warning
+```
 
 ## DeepSeek API Key
 

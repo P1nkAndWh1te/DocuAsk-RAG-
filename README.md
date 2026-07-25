@@ -1,12 +1,12 @@
 # DocuAsk
 
-DocuAsk is a local document QA system built around a Retrieval-Augmented Generation (RAG) pipeline:
+DocuAsk is a local Agentic RAG document QA system built around a Retrieval-Augmented Generation pipeline:
 
 ```text
-document upload -> chunking -> embedding -> retrieval -> context assembly -> LLM answer -> source citations
+document upload -> chunking -> embedding -> intent routing -> tool selection -> retrieval/rerank -> answer/fallback -> source citations
 ```
 
-The application uses Streamlit for the UI, FastAPI for reusable backend endpoints, Chroma for local vector storage, BGE for Chinese embedding, BM25/RRF/rerank for retrieval comparison, and DeepSeek through an OpenAI-compatible LLM API.
+The application uses Streamlit for the UI, FastAPI for reusable backend endpoints, Chroma for local vector storage, BGE for Chinese embedding, BM25/RRF/rerank for retrieval comparison, a lightweight Agentic RAG planner for intent routing and tool selection, and DeepSeek through an OpenAI-compatible LLM API.
 
 ## Highlights
 
@@ -14,6 +14,7 @@ The application uses Streamlit for the UI, FastAPI for reusable backend endpoint
 - Split documents by Markdown sections or fixed-size chunks with overlap.
 - Store document chunks in a local Chroma persistent collection.
 - Retrieve chunks with vector search, BM25, RRF ranking fusion, or a local rerank stage.
+- Route questions through Agentic RAG intent classification, tool selection, trace logging, and fallback/refusal logic.
 - Generate grounded answers with source chunk citations.
 - Evaluate retrieval quality with Top-1 hit and Top-k recall.
 - Expose reusable FastAPI endpoints for ingestion, QA, answer generation, and evaluation.
@@ -66,6 +67,8 @@ Docker 方式：
 docker compose up --build
 ```
 
+Docker uses `requirements-docker.txt` for a lighter reproducible demo path. It supports the default Teaching keyword embedding mode. For BGE mode inside Docker, install the full `requirements.txt` dependencies because BGE requires `sentence-transformers`.
+
 ## DeepSeek API Key
 
 生成回答需要在启动 Streamlit 的同一个 PowerShell 中设置环境变量：
@@ -103,6 +106,8 @@ API Key 为什么不能写进代码？
 什么是 embedding？
 向量数据库有什么作用？
 DeepSeek API 怎么配置？
+总结这份文档
+今天上海天气怎么样？
 ```
 
 ## 检索评测结果
@@ -145,6 +150,7 @@ Rerank retrieval: Top-1 86.7%, Top-k 100%
 - Chroma 持久化目录是本地运行数据，不提交到 GitHub。
 - BGE 模型首次加载需要等待。
 - 当前 rerank 是本地轻量重排，不是外部 cross-encoder rerank 模型。
+- 当前 Agentic RAG planner 是规则型轻量 planner，不是多 Agent 框架。
 - BGE 首次加载会比教学版关键词 embedding 慢。
 - 自动化测试不调用真实 LLM API，避免依赖 API Key、网络和额度。
 

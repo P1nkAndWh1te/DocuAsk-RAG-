@@ -1,7 +1,5 @@
 from functools import lru_cache
 
-from sentence_transformers import SentenceTransformer
-
 
 BGE_MODEL_NAME = "BAAI/bge-small-zh-v1.5"
 KEYWORD_EMBEDDING_MODE = "Teaching keyword embedding"
@@ -53,7 +51,15 @@ def embed_text(text: str) -> list[float]:
 
 
 @lru_cache(maxsize=1)
-def load_bge_model() -> SentenceTransformer:
+def load_bge_model():
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError as exc:
+        raise RuntimeError(
+            "BGE embedding requires sentence-transformers. "
+            "Install the full requirements.txt to use BGE mode."
+        ) from exc
+
     return SentenceTransformer(BGE_MODEL_NAME)
 
 

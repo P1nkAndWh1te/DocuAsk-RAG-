@@ -2,7 +2,7 @@
 
 本文档记录 DocuAsk 当前 FastAPI 后端已经验证的接口。
 
-当前后端定位：为本地文档 RAG 问答系统提供可复用的文档入库、文件上传、检索问答、LLM answer 生成和检索评测能力。
+当前后端定位：为本地文档 Agentic RAG 问答系统提供可复用的文档入库、文件上传、检索问答、Agentic ask、LLM answer 生成和检索评测能力。
 
 ## 启动后端
 
@@ -181,11 +181,74 @@ sources
 - 如果没有设置 `DEEPSEEK_API_KEY`，接口返回 503。
 - 自动化测试不调用真实 LLM API，只验证无 key 分支。
 
+## POST /agent/ask
+
+用途：在回答前执行轻量 Agentic RAG 流程，包括 intent routing、tool selection、retrieval/rerank、fallback/refusal 和 trace 输出。
+
+请求体：
+
+```json
+{
+  "collection_name": "uploaded_document_chunks_keyword_v3_xxxxxxxxxxxx",
+  "question": "RAG 的基本流程是什么？",
+  "embedding_mode": "Teaching keyword embedding",
+  "top_k": 3,
+  "retrieval_mode": "auto",
+  "use_llm": false
+}
+```
+
+`retrieval_mode` 支持：
+
+```text
+auto
+vector
+bm25
+rrf
+rerank
+```
+
+响应字段：
+
+```text
+question
+intent
+embedding_mode
+collection_name
+retrieval_mode
+selected_tools
+top_k
+retrieved_chunks
+context
+sources
+final_answer
+trace
+confidence
+fallback_reason
+```
+
+当前 intent 包括：
+
+```text
+document_qa
+summary
+compare
+metadata_query
+out_of_scope
+```
+
+说明：
+
+- `auto` 模式下，普通文档问答默认选择 `rerank`，总结类问题选择 `scan`，来源/片段类问题倾向 `bm25`。
+- `trace` 记录 `classify_intent`、`plan`、`retrieve`、`answer/refuse` 等执行步骤。
+- `use_llm=false` 时接口返回基于上下文的本地回答，便于测试和无 API Key 环境演示。
+- 文档外问题会触发拒答，返回 `fallback_reason=out_of_scope`。
+
 ## POST /evaluation
 
-用途：用固定 10 题评测当前文档切分和检索模式的召回效果。
+用途：用固定 15 题评测当前文档切分和检索模式的召回效果。
 
-如果请求体传入 `evaluation_cases`，接口会使用自定义问题集；如果不传，使用默认 FAQ 10 题。
+如果请求体传入 `evaluation_cases`，接口会使用自定义问题集；如果不传，使用默认 FAQ 15 题。
 
 请求体：
 
@@ -253,6 +316,9 @@ failure_cases
 | `/answer` 缺少 `DEEPSEEK_API_KEY` | 503 |
 | `/answer` LLM quota / rate limit | 429 |
 | `/answer` LLM 请求失败 | 502 |
+| `/agent/ask` 不支持的 retrieval mode | 400 |
+| `/agent/ask` 查询不存在的 collection | 404 |
+| `/agent/ask` LLM quota / request failed | 429 / 502 |
 
 ## 自动化验证
 
@@ -269,6 +335,7 @@ POST /documents
 POST /documents/upload: markdown upload, docx upload, unsupported file type, and invalid PDF
 POST /qa: vector / bm25 / rrf / rerank
 POST /answer: missing API key and unknown retrieval mode
+POST /agent/ask: intent routing, tool selection, trace, refusal, and no-key local answer
 POST /evaluation: vector / bm25 / rrf / rerank
 POST /evaluation: custom evaluation cases
 POST /evaluation: failure cases

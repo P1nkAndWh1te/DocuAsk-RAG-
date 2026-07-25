@@ -4,12 +4,12 @@
 
 ## 1. 项目一句话介绍
 
-DocuAsk 是一个本地文档 RAG 问答系统。用户上传 `.txt`、`.md`、`.pdf` 或 `.docx` 文档后，系统会把文档解析并切分成片段，转换成向量并写入 Chroma 向量数据库；用户提问时，系统先从本地文档中检索相关片段，可选择 rerank 做二阶段重排，再把片段交给大模型生成回答，并返回答案来源。
+DocuAsk 是一个本地文档 Agentic RAG 问答系统。用户上传 `.txt`、`.md`、`.pdf` 或 `.docx` 文档后，系统会把文档解析并切分成片段，转换成向量并写入 Chroma 向量数据库；用户提问时，系统先判断问题 intent，再选择检索、rerank、总结、引用或拒答等工具，最后基于文档上下文生成回答并返回答案来源。
 
 核心链路可以概括为：
 
 ```text
-文档上传 -> 文本读取 -> 文档切分 -> embedding -> Chroma 入库 -> 检索召回 -> 上下文组装 -> LLM 生成 -> 来源引用
+文档上传 -> 文本读取 -> 文档切分 -> embedding -> Chroma 入库 -> intent routing -> tool selection -> 检索 / rerank -> 回答 / 拒答 -> 来源引用
 ```
 
 这个项目重点不是做一个复杂的在线平台，而是把 RAG 系统中最关键、最容易被追问的环节跑通，并且让检索效果可以被评测。
@@ -41,7 +41,7 @@ DocuAsk 使用 RAG 思路解决这个问题：回答前先查资料，再基于�
 - 针对项目说明文档提问。
 - 针对接口说明、学习笔记、技术资料做问答。
 - 验证不同检索策略的召回效果。
-- 演示一个可运行、可测试、可解释的 RAG 最小系统。
+- 演示一个可运行、可测试、可解释的 Agentic RAG 最小系统。
 
 当前不适合直接包装成生产系统，因为它还没有多用户权限、扫描版 PDF OCR、线上部署运维、权限隔离、生产级日志监控和大规模压测。
 
@@ -59,6 +59,7 @@ DocuAsk 使用 RAG 思路解决这个问题：回答前先查资料，再基于�
 | DeepSeek API | LLM 生成回答 |
 | BM25 | 关键词检索 baseline |
 | RRF | 融合向量检索和 BM25 排序 |
+| Agentic planner | 负责 intent routing、tool selection、trace 和 fallback/refusal |
 | pytest | 自动化测试 |
 | python-multipart | 支持 FastAPI 文件上传 |
 | pypdf | 提取 PDF 文本 |
@@ -83,6 +84,7 @@ docuask/
     app.py
     services/
       chunking.py
+      agent.py
       embeddings.py
       retrieval.py
       bm25.py
@@ -98,10 +100,12 @@ docuask/
     docuask_backend_faq.md
   tests/
     conftest.py
+    test_agentic_rag.py
     test_backend_api.py
     test_retrieval_metrics.py
   Dockerfile
   docker-compose.yml
+  requirements-docker.txt
 ```
 
 几个关键文件的含义：
@@ -117,6 +121,7 @@ docuask/
 | `ARCHITECTURE.md` | 架构说明 |
 | `API.md` | 后端接口说明 |
 | `PROJECT_BRIEF.md` | 项目展示说明 |
+| `requirements-docker.txt` | Docker 轻量运行依赖 |
 
 ## 6. 整体架构
 
@@ -134,7 +139,9 @@ flowchart TD
     C --> D["chunking.py 文档切分"]
     D --> E["embeddings.py 生成 embedding"]
     E --> F["retrieval.py 写入 Chroma"]
-    G["用户提问"] --> H["选择 retrieval_mode"]
+    G["用户提问"] --> A1["agent.py 判断 intent"]
+    A1 --> A2["选择工具"]
+    A2 --> H["选择 retrieval_mode"]
     H --> I["vector 检索"]
     H --> J["BM25 检索"]
     H --> K["RRF 融合检索"]
@@ -145,7 +152,9 @@ flowchart TD
     R --> L
     L --> M["组装 RAG context"]
     M --> N["generation.py 调用 DeepSeek"]
+    M --> A3["fallback / refusal"]
     N --> O["返回答案 + 来源 chunks"]
+    A3 --> O
 ```
 
 ## 7. 核心知识点
@@ -370,7 +379,37 @@ backend/services/rerank.py
 
 当前 rerank 是本地轻量重排，不是外部 cross-encoder rerank 模型。
 
-### 7.9 LLM Answer Generation
+### 7.9 Agentic RAG
+
+Agentic RAG 在普通 RAG 前增加了一个轻量决策层。
+
+当前实现位于：
+
+```text
+backend/services/agent.py
+```
+
+核心流程是：
+
+```text
+classify_intent -> select_tools -> retrieve / scan / rerank -> answer / refuse -> trace
+```
+
+当前支持的 intent：
+
+| Intent | 说明 |
+|---|---|
+| `document_qa` | 普通文档问答 |
+| `summary` | 总结文档或片段 |
+| `compare` | 对比多个概念或片段 |
+| `metadata_query` | 查询来源、chunk、引用信息 |
+| `out_of_scope` | 文档外问题，触发拒答 |
+
+Agent 会返回 `selected_tools`、`trace`、`confidence` 和 `fallback_reason`。这样用户不只看到最终回答，还能看到系统为什么选择某种检索方式、为什么使用上下文回答，或为什么拒答。
+
+当前这个 planner 是规则型轻量 planner，优点是稳定、可测试、面试时容易解释；它还不是复杂多 Agent Runtime。
+
+### 7.10 LLM Answer Generation
 
 项目使用 DeepSeek 作为 OpenAI-compatible LLM API。
 
@@ -397,7 +436,7 @@ Prompt 核心约束是：
 回答最后必须写一行来源。
 ```
 
-### 7.10 FastAPI
+### 7.11 FastAPI
 
 FastAPI 负责把 RAG 能力包装成接口。
 
@@ -410,6 +449,7 @@ FastAPI 负责把 RAG 能力包装成接口。
 | `POST /documents/upload` | 文件上传入库 |
 | `POST /qa` | 检索问答，返回 chunks 和 context |
 | `POST /answer` | 检索后调用 LLM 生成回答 |
+| `POST /agent/ask` | Agentic RAG 问答，返回 intent、tools、trace、fallback 和答案 |
 | `POST /evaluation` | 检索评测 |
 
 接口错误会返回结构化错误码，相关实现位于：
@@ -437,7 +477,7 @@ backend/services/errors.py
 backend/app.py
 ```
 
-### 7.11 Streamlit
+### 7.12 Streamlit
 
 Streamlit 是项目的页面入口，位于：
 
@@ -457,7 +497,7 @@ app.py
 - 展示最终 answer 和 sources。
 - 展示 retrieval evaluation 表格。
 
-### 7.12 pytest
+### 7.13 pytest
 
 pytest 用于自动化验证项目核心行为。
 
@@ -779,6 +819,10 @@ docker compose up --build
 - Chroma 本地持久化。
 - vector / BM25 / RRF / rerank 四种检索模式。
 - rerank 二阶段重排。
+- Agentic RAG intent routing。
+- Tool selection。
+- Agent trace。
+- 文档外问题拒答与 fallback reason。
 - 检索上下文展示。
 - DeepSeek 生成回答。
 - 来源 chunk 引用。
@@ -795,6 +839,8 @@ docker compose up --build
 
 - 扫描版 PDF OCR。
 - 外部 cross-encoder rerank 模型。
+- 复杂多 Agent Runtime。
+- LLM 自主工具调用。
 - 多用户权限。
 - 多租户知识库隔离。
 - 大规模 benchmark。

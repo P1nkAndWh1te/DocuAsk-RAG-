@@ -2,6 +2,7 @@ from fastapi import FastAPI, File, Form, UploadFile
 from openai import OpenAIError, RateLimitError
 from pydantic import BaseModel, Field
 
+from backend.services.agent import AGENT_RETRIEVAL_MODES, run_agentic_rag
 from backend.services.bm25 import retrieve_relevant_chunks_bm25
 from backend.services.chunking import split_text_into_chunks
 from backend.services.document_parser import (
@@ -63,6 +64,7 @@ class RetrievedChunk(BaseModel):
     score: float | None = None
     rrf_score: float | None = None
     rerank_score: float | None = None
+    scan_score: float | None = None
 
 
 class QaRequest(BaseModel):
@@ -90,6 +92,39 @@ class AnswerRequest(QaRequest):
 class AnswerResponse(QaResponse):
     answer: str
     sources: str
+
+
+class AgentRequest(BaseModel):
+    collection_name: str = Field(..., min_length=1)
+    question: str = Field(..., min_length=1)
+    embedding_mode: str = KEYWORD_EMBEDDING_MODE
+    top_k: int = Field(default=3, ge=1, le=10)
+    retrieval_mode: str = "auto"
+    use_llm: bool = True
+
+
+class AgentTraceStep(BaseModel):
+    step: str
+    tool: str = ""
+    result: str
+    details: str = ""
+
+
+class AgentResponse(BaseModel):
+    question: str
+    intent: str
+    embedding_mode: str
+    collection_name: str
+    retrieval_mode: str
+    selected_tools: list[str]
+    top_k: int
+    retrieved_chunks: list[RetrievedChunk]
+    context: str
+    sources: str
+    final_answer: str
+    trace: list[AgentTraceStep]
+    confidence: str
+    fallback_reason: str
 
 
 class EvaluationCase(BaseModel):
@@ -296,6 +331,61 @@ def answer_document(request: AnswerRequest) -> AnswerResponse:
     )
 
 
+@app.post("/agent/ask", response_model=AgentResponse)
+def ask_agent(request: AgentRequest) -> AgentResponse:
+    if request.embedding_mode not in COLLECTION_NAMES:
+        raise_http_error(400, ErrorCode.UNSUPPORTED_EMBEDDING_MODE, "unsupported embedding mode")
+
+    if request.retrieval_mode not in AGENT_RETRIEVAL_MODES:
+        raise_http_error(400, ErrorCode.UNSUPPORTED_RETRIEVAL_MODE, "unsupported retrieval mode")
+
+    chunks = get_chunks_from_collection(request.collection_name)
+    if chunks is None:
+        raise_http_error(404, ErrorCode.COLLECTION_NOT_FOUND, "collection not found")
+
+    try:
+        result = run_agentic_rag(
+            question=request.question,
+            chunks=chunks,
+            embedding_mode=request.embedding_mode,
+            top_k=request.top_k,
+            retrieval_mode=request.retrieval_mode,
+            use_llm=request.use_llm,
+        )
+    except RateLimitError as exc:
+        raise_http_error(429, ErrorCode.LLM_RATE_LIMIT, "LLM quota or rate limit failed")
+    except OpenAIError as exc:
+        raise_http_error(502, ErrorCode.LLM_REQUEST_FAILED, "LLM request failed")
+
+    return AgentResponse(
+        question=result["question"],
+        intent=result["intent"],
+        embedding_mode=request.embedding_mode,
+        collection_name=request.collection_name,
+        retrieval_mode=result["retrieval_mode"],
+        selected_tools=result["selected_tools"],
+        top_k=request.top_k,
+        retrieved_chunks=[
+            RetrievedChunk(
+                chunk_index=item["chunk_index"],
+                text=item["text"],
+                distance=item.get("distance"),
+                score=item.get("score"),
+                rrf_score=item.get("rrf_score"),
+                rerank_score=item.get("rerank_score"),
+                scan_score=item.get("scan_score"),
+            )
+            for item in result["retrieved_chunks"]
+        ],
+        context=result["context"],
+        sources=result["sources"],
+        final_answer=result["final_answer"],
+        trace=[AgentTraceStep(**item) for item in result["trace"]],
+        confidence=result["confidence"],
+        fallback_reason=result["fallback_reason"],
+    )
+
+
 def retrieve_chunks_for_request(request: QaRequest) -> list[dict] | None:
     if request.retrieval_mode == "vector":
         return retrieve_relevant_chunks_from_collection(
@@ -343,6 +433,7 @@ def build_qa_response(request: QaRequest, retrieved_chunks: list[dict]) -> QaRes
                 score=item.get("score"),
                 rrf_score=item.get("rrf_score"),
                 rerank_score=item.get("rerank_score"),
+                scan_score=item.get("scan_score"),
             )
             for item in retrieved_chunks
         ],

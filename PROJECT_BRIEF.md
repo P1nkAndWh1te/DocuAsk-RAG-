@@ -1,11 +1,11 @@
-# RAG QA System 项目展示说明
+# DocuAsk Agentic RAG 项目展示说明
 
 ## 项目定位
 
-RAG QA System 是一个本地文档问答原型，用于验证 RAG 的核心链路：
+DocuAsk 是一个本地文档 Agentic RAG 问答原型，用于验证 RAG 与轻量 Agentic 执行链路：
 
 ```text
-文档上传 -> 文档切分 -> embedding -> Chroma 检索 -> LLM 回答 -> 来源引用
+文档上传 -> 文档切分 -> embedding -> intent routing -> tool selection -> 检索 / rerank -> 回答 / 拒答 -> 来源引用
 ```
 
 项目重点不是做一个复杂平台，而是用最小可运行系统证明：
@@ -14,6 +14,7 @@ RAG QA System 是一个本地文档问答原型，用于验证 RAG 的核心链�
 - 能把检索上下文交给 LLM 生成回答。
 - 能展示来源 chunk，降低幻觉风险。
 - 能用固定问题集评估检索质量。
+- 能通过 Agent trace 解释 intent、工具选择、检索和 fallback/refusal 过程。
 
 ## 核心功能
 
@@ -24,10 +25,12 @@ RAG QA System 是一个本地文档问答原型，用于验证 RAG 的核心链�
 - FastAPI 文档入库、检索问答和检索评测接口。
 - FastAPI multipart 文件上传接口，支持 `.txt` / `.md` / `.pdf` / `.docx`。
 - FastAPI answer 接口，支持基于检索上下文生成最终回答。
+- FastAPI `/agent/ask` 接口，支持 intent routing、tool selection、trace 和拒答边界。
 - 双 embedding 模式：
   - `Teaching keyword embedding`
   - `BGE Chinese embedding`
 - `vector`、`bm25`、`rrf`、`rerank` 四种检索模式。
+- Agentic RAG 模式，支持 `document_qa`、`summary`、`compare`、`metadata_query`、`out_of_scope` intent。
 - DeepSeek OpenAI-compatible LLM API 生成回答。
 - 来源 chunk 展示。
 - 15 题固定检索评测。
@@ -48,6 +51,7 @@ RAG QA System 是一个本地文档问答原型，用于验证 RAG 的核心链�
 | Teaching embedding | 手写关键词向量 |
 | Real embedding | BAAI/bge-small-zh-v1.5 |
 | Retrieval | Vector / BM25 / RRF / Rerank |
+| Agentic layer | Intent routing / Tool selection / Trace / Fallback |
 | LLM API | DeepSeek OpenAI-compatible API |
 | SDK | OpenAI Python SDK |
 | Test | pytest |
@@ -119,6 +123,16 @@ Top-k recall 评估正确资料是否进入候选集合。
 
 它的作用不是替代向量检索或 BM25，而是在候选集已经召回正确资料后，提高第一名排序质量。
 
+### 6. Agentic RAG 采用轻量规则型 planner
+
+第一版 Agentic RAG 没有直接引入复杂多 Agent 框架，而是先实现可测试、可解释的规则型 planner：
+
+```text
+classify_intent -> select_tools -> retrieve / scan / rerank -> answer / refuse -> trace
+```
+
+这样可以稳定验证 Agent 行为，并通过 `trace` 展示每一步为什么执行。
+
 ## 如何运行
 
 ```powershell
@@ -132,6 +146,8 @@ Docker 方式：
 docker compose up --build
 ```
 
+Docker 默认使用轻量 `requirements-docker.txt`，适合快速复现 Teaching keyword embedding 演示；如需在 Docker 内使用 BGE，需要安装完整依赖。
+
 如需 LLM 生成回答：
 
 ```powershell
@@ -144,7 +160,7 @@ python -m streamlit run app.py
 - 上传 FAQ 文档后，页面会展示文档切分结果。
 - 侧边栏可以切换 embedding 模式。
 - Retrieval evaluation 区域显示 Top-1 hit 和 Top-k recall。
-- 提问后可以看到检索上下文、来源 chunk 和最终回答。
+- Agentic RAG 模式下可以看到 intent、selected tools、trace、confidence、fallback reason、来源 chunk 和最终回答。
 - BM25 和 RRF 模式可用于对比语义检索与关键词检索的排序差异。
 
 ## 当前限制
@@ -154,6 +170,7 @@ python -m streamlit run app.py
 - 当前只验证了小型 FAQ 文档。
 - 当前多文档评测仍是小样本，不是大规模 benchmark。
 - 当前 rerank 是本地轻量重排，不是外部 cross-encoder 模型。
+- 当前 Agentic RAG 是轻量规则型 planner，不是复杂多 Agent Runtime。
 - BGE 首次加载需要等待。
 - 自动化测试不调用真实 LLM API，避免依赖 API Key、网络和额度。
 

@@ -1,6 +1,6 @@
 # DocuAsk FastAPI Backend
 
-This backend is the first step of the DocuAsk v2 upgrade.
+This backend provides the reusable API boundary for DocuAsk's RAG and Agentic RAG flows.
 
 Current scope:
 
@@ -10,8 +10,10 @@ POST /documents
 POST /documents/upload
 POST /qa
 POST /answer
+POST /agent/ask
 POST /evaluation
 services/chunking.py
+services/agent.py
 services/bm25.py
 services/embeddings.py
 services/evaluation.py
@@ -147,6 +149,36 @@ sources
 
 If `DEEPSEEK_API_KEY` is not set, the endpoint returns 503.
 
+## Ask with Agentic RAG
+
+Use the `collection_name` returned by `POST /documents`.
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/agent/ask" -Method Post -ContentType "application/json" -Body '{
+  "collection_name": "uploaded_document_chunks_keyword_xxxxxxxxxxxx",
+  "question": "RAG 的基本流程是什么？",
+  "embedding_mode": "Teaching keyword embedding",
+  "top_k": 3,
+  "retrieval_mode": "auto",
+  "use_llm": false
+}'
+```
+
+Expected fields:
+
+```text
+intent
+selected_tools
+retrieval_mode
+retrieved_chunks
+final_answer
+trace
+confidence
+fallback_reason
+```
+
+`use_llm=false` is useful for local tests and demos without an API key. In `auto` mode, the agent classifies the question, chooses tools, retrieves or scans chunks, and may refuse out-of-scope questions.
+
 ## Test
 
 From the project root:
@@ -162,6 +194,7 @@ POST /documents
 POST /documents/upload markdown/docx upload, unsupported file type, and invalid PDF
 POST /qa with vector, bm25, rrf, and rerank retrieval modes
 POST /answer missing API key and unknown retrieval mode
+POST /agent/ask intent routing, tool selection, trace, refusal, and local no-key answer
 POST /evaluation with vector, bm25, rrf, and rerank retrieval modes
 POST /evaluation with custom evaluation cases
 failure case recording

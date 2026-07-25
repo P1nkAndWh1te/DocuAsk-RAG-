@@ -10,6 +10,7 @@ if str(APP_ROOT) not in sys.path:
     sys.path.insert(0, str(APP_ROOT))
 
 from backend.services.chunking import split_text_into_chunks
+from backend.services.agent import AGENT_RETRIEVAL_MODES, run_agentic_rag
 from backend.services.document_parser import parse_uploaded_document
 from backend.services.embeddings import (
     BGE_EMBEDDING_MODE,
@@ -73,6 +74,17 @@ def main() -> None:
         help="Rerank retrieves candidates first and then reorders them with a local reranker.",
     )
     st.sidebar.caption(f"Current retrieval: {retrieval_mode}")
+    agentic_mode = st.sidebar.checkbox(
+        "Agentic RAG mode",
+        value=True,
+        help="Use intent routing, tool selection, trace, and fallback logic before answering.",
+    )
+    agent_retrieval_mode = st.sidebar.selectbox(
+        "Agent retrieval",
+        sorted(AGENT_RETRIEVAL_MODES),
+        index=sorted(AGENT_RETRIEVAL_MODES).index("auto"),
+        help="Auto lets the agent choose a retrieval strategy based on the question intent.",
+    )
 
     uploaded_file = st.file_uploader(
         "Upload a document",
@@ -159,6 +171,52 @@ def main() -> None:
             st.warning("Please enter a question.")
             return
 
+        if agentic_mode:
+            st.subheader("Agentic answer")
+            try:
+                agent_result = run_agentic_rag(
+                    question=question,
+                    chunks=chunks,
+                    top_k=TOP_K,
+                    embedding_mode=embedding_mode,
+                    retrieval_mode=agent_retrieval_mode,
+                    use_llm=True,
+                )
+            except RateLimitError as exc:
+                st.error("DeepSeek request reached the server, but quota or rate limit failed.")
+                st.exception(exc)
+                return
+            except OpenAIError as exc:
+                st.error("DeepSeek request failed.")
+                st.exception(exc)
+                return
+
+            st.write(agent_result["final_answer"])
+            metric_columns = st.columns(3)
+            metric_columns[0].metric("Intent", agent_result["intent"])
+            metric_columns[1].metric("Retrieval", agent_result["retrieval_mode"])
+            metric_columns[2].metric("Confidence", agent_result["confidence"])
+
+            if agent_result["fallback_reason"]:
+                st.warning(f"Fallback: {agent_result['fallback_reason']}")
+
+            st.write("Selected tools:", ", ".join(agent_result["selected_tools"]) or "none")
+            st.write("Sources:", agent_result["sources"] or "none")
+
+            st.subheader("Agent trace")
+            st.dataframe(agent_result["trace"], use_container_width=True, hide_index=True)
+
+            st.subheader("Retrieved chunks")
+            for rank, item in enumerate(agent_result["retrieved_chunks"], start=1):
+                score_label = format_score_label(item)
+                with st.expander(
+                    f"Rank {rank} | Chunk {item['chunk_index']} | {score_label}",
+                    expanded=rank == 1,
+                ):
+                    st.code(item["text"], language="markdown")
+
+            return
+
         st.subheader("Answer")
         retrieved_chunks = retrieve_for_mode(
             question,
@@ -232,6 +290,7 @@ def format_score_label(item: dict) -> str:
         ("rerank_score", "Rerank score"),
         ("rrf_score", "RRF score"),
         ("score", "BM25 score"),
+        ("scan_score", "Scan score"),
         ("distance", "Distance"),
     ):
         if key in item and item[key] is not None:

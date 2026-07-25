@@ -4,10 +4,10 @@
 
 ## 当前定位
 
-DocuAsk 是一个本地文档 RAG 问答系统原型，当前结构为：
+DocuAsk 是一个本地文档 Agentic RAG 问答系统原型，当前结构为：
 
 ```text
-Streamlit UI + FastAPI backend + file upload + reusable RAG services + Chroma persistent storage + rerank + LLM answer generation + retrieval evaluation
+Streamlit UI + FastAPI backend + file upload + reusable RAG services + Chroma persistent storage + agent planner + tool selection + rerank + LLM answer generation + retrieval evaluation
 ```
 
 当前重点解决三个问题：
@@ -15,6 +15,7 @@ Streamlit UI + FastAPI backend + file upload + reusable RAG services + Chroma pe
 - 本地文档问答需要来源可追溯。
 - 检索质量需要可量化评估。
 - RAG 核心逻辑需要从页面中拆出，便于复用和测试。
+- 问答流程需要具备 intent routing、tool selection、trace 和拒答边界。
 
 ## 模块结构
 
@@ -30,6 +31,7 @@ docuask/
       chunking.py
       embeddings.py
       retrieval.py
+      agent.py
       generation.py
       bm25.py
       rrf.py
@@ -54,6 +56,9 @@ flowchart TD
     B --> C["embed_for_mode"]
     C --> D["Chroma PersistentClient"]
     E["User question"] --> F["retrieval_mode"]
+    E --> A1["classify_intent"]
+    A1 --> A2["tool selection"]
+    A2 --> F
     F --> G["vector retrieval"]
     F --> H["BM25 retrieval"]
     F --> I["RRF fusion"]
@@ -64,6 +69,7 @@ flowchart TD
     R --> J
     J --> K["Context with Chunk sources"]
     K --> L["DeepSeek generation"]
+    K --> A3["fallback / refusal"]
     J --> M["/evaluation metrics"]
 ```
 
@@ -73,8 +79,9 @@ flowchart TD
 - `bm25` 使用本地轻量 BM25 关键词检索。
 - `rrf` 融合 vector ranking 和 BM25 ranking。
 - `rerank` 先召回候选 chunks，再做本地轻量重排。
+- Agentic mode 会先判断 intent，再选择 retrieval/rerank/summary/refusal 工具。
 - Streamlit 页面当前负责用户交互。
-- FastAPI 后端当前负责文档入库、检索问答、LLM answer 生成和检索评测。
+- FastAPI 后端当前负责文档入库、检索问答、Agentic ask、LLM answer 生成和检索评测。
 
 ## Service 边界
 
@@ -83,6 +90,7 @@ flowchart TD
 | `chunking.py` | 文档切分，优先按 Markdown `##` 标题切分，否则使用固定长度和 overlap |
 | `embeddings.py` | 管理 Teaching keyword embedding 和 BGE Chinese embedding |
 | `retrieval.py` | 管理 Chroma 持久化、collection 命名、向量检索和上下文格式化 |
+| `agent.py` | 管理 intent routing、tool selection、Agent trace、fallback 和拒答 |
 | `generation.py` | 管理 RAG prompt、DeepSeek 调用和 sources 格式化 |
 | `bm25.py` | 提供关键词检索 baseline |
 | `rrf.py` | 融合向量检索和 BM25 排名 |
@@ -98,12 +106,33 @@ flowchart TD
 |---|---|
 | `GET /health` | 后端健康检查 |
 | `POST /documents` | 文档切分、embedding、写入 Chroma |
-| `POST /documents/upload` | 接收 `.txt/.md` 文件并复用文档入库流程 |
+| `POST /documents/upload` | 接收 `.txt/.md/.pdf/.docx` 文件并复用文档入库流程 |
 | `POST /qa` | 对已入库 collection 执行 Top-k 检索 |
 | `POST /answer` | 检索 chunks 后调用 LLM 生成 answer 和 sources |
+| `POST /agent/ask` | 执行 Agentic RAG：intent、tool selection、trace、fallback/refusal |
 | `POST /evaluation` | 用固定问题集评估检索模式，并记录 failure cases |
 
-`POST /evaluation` 默认使用 FAQ 10 题，也支持传入自定义 `evaluation_cases`，用于不同文档配置不同问题集。
+`POST /evaluation` 默认使用 FAQ 15 题，也支持传入自定义 `evaluation_cases`，用于不同文档配置不同问题集。
+
+## Agentic RAG 流程
+
+当前 Agentic RAG 是轻量规则型 planner，不依赖复杂多 Agent 框架：
+
+```text
+question -> classify_intent -> choose tools -> retrieve / scan / rerank -> answer or refuse -> trace
+```
+
+当前 intent：
+
+| Intent | 说明 |
+|---|---|
+| `document_qa` | 普通文档问答 |
+| `summary` | 总结文档或片段 |
+| `compare` | 对比多个概念或片段 |
+| `metadata_query` | 查询来源、chunk、引用信息 |
+| `out_of_scope` | 文档外问题，触发拒答 |
+
+`/agent/ask` 返回 `selected_tools`、`trace`、`confidence` 和 `fallback_reason`，用于解释系统为什么检索、为什么拒答或为什么使用上下文答案。
 
 ## 检索模式
 
@@ -123,7 +152,7 @@ rrf    Top-1: 0.8,   Top-k: 0.933
 rerank Top-1: 0.867, Top-k: 1.0
 ```
 
-这个结果只能说明当前 FAQ 文档和 10 个固定问题下的表现。
+这个结果只能说明当前 FAQ 文档和 15 个固定问题下的表现。
 
 ## 持久化策略
 
@@ -157,7 +186,7 @@ uploaded_document_chunks_bge_v3_xxxxxxxxxxxx
 当前测试目标不是测试 DeepSeek 生成，而是稳定验证本地检索链路：
 
 ```text
-文档入库 -> collection 查询 -> 检索模式切换 -> 固定问题评测 -> 错误分支
+文档入库 -> collection 查询 -> 检索模式切换 -> Agentic ask -> 固定问题评测 -> 错误分支
 ```
 
 当前评测能力包括：
@@ -182,11 +211,12 @@ uploaded_document_chunks_bge_v3_xxxxxxxxxxxx
 - 大规模评测或压测完成。
 - 已接入外部 rerank 模型。
 - 大规模线上 LLM 调用稳定性验证。
+- 当前 Agentic RAG 是轻量规则型 planner，不是多 Agent 框架。
 
 更准确的当前表述：
 
 ```text
-DocuAsk 已完成本地 `.txt/.md/.pdf/.docx` 文件上传、切分、向量入库、四种检索模式、来源上下文展示、LLM answer 生成、failure cases 和固定问题检索评测。
+DocuAsk 已完成本地 `.txt/.md/.pdf/.docx` 文件上传、切分、向量入库、四种检索模式、Agentic RAG intent routing、tool selection、trace、拒答、来源上下文展示、LLM answer 生成、failure cases 和固定问题检索评测。
 ```
 
 ## 下一步

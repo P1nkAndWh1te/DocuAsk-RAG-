@@ -2,7 +2,7 @@
 
 本文档记录 DocuAsk 当前 FastAPI 后端已经验证的接口。
 
-当前后端定位：为本地文档 Agentic RAG 问答系统提供可复用的文档入库、文件上传、检索问答、Agentic ask、LLM answer 生成和检索评测能力。
+当前后端定位：为本地文档 Agentic RAG 问答系统提供可复用的文档入库、文件上传、检索问答、Agentic ask、OnCall diagnosis、LLM answer 生成和检索评测能力。
 
 ## 启动后端
 
@@ -357,6 +357,96 @@ failure_cases
 
 结论：在当前小型 FAQ 测试集上，BM25 和 rerank 的 Top-1 表现更好，rerank 同时保持 100% Top-k recall；但这只是 15 题固定评测结果，不能直接推断到所有文档场景。
 
+## POST /oncall/diagnose
+
+用途：根据结构化告警、mock 指标、mock 日志、历史事件和 runbook 检索结果生成 OnCall 诊断建议。
+
+请求体：
+
+```json
+{
+  "text": "# DocuAsk OnCall Runbook\n\n## API 5xx 错误率升高怎么排查？\n...",
+  "embedding_mode": "Teaching keyword embedding",
+  "chunk_size": 350,
+  "chunk_overlap": 50,
+  "top_k": 3,
+  "retrieval_mode": "rerank",
+  "alert": {
+    "service": "order-service",
+    "alert_name": "HighErrorRate",
+    "severity": "P1",
+    "metric": "http_5xx_rate",
+    "value": "12%",
+    "duration": "5m"
+  }
+}
+```
+
+响应字段：
+
+```text
+alert
+selected_tools
+metrics
+logs
+incidents
+retrieved_chunks
+sources
+possible_causes
+primary_cause
+confidence
+final_answer
+trace
+```
+
+说明：
+
+- 当前 metrics、logs、incidents 是本地 mock 数据，用来验证 Agent 工具编排和证据组合。
+- `retrieved_chunks` 来自上传的 runbook 文档。
+- `primary_cause` 是本地规则原因排序结果，不是外部模型判断。
+- `final_answer` 会包含证据、来源和安全动作建议。
+
+## POST /oncall/evaluation
+
+用途：用固定或自定义告警案例评估 OnCall 诊断链路。
+
+请求体：
+
+```json
+{
+  "text": "# DocuAsk OnCall Runbook\n\n## API 5xx 错误率升高怎么排查？\n...",
+  "embedding_mode": "Teaching keyword embedding",
+  "chunk_size": 350,
+  "chunk_overlap": 50,
+  "top_k": 3,
+  "retrieval_mode": "rerank"
+}
+```
+
+响应字段：
+
+```text
+embedding_mode
+retrieval_mode
+chunk_count
+case_count
+root_cause_hit_rate
+tool_selection_accuracy
+evidence_citation_rate
+safe_action_rate
+rows
+failure_cases
+```
+
+当前默认 OnCall 小样本评测关注四个指标：
+
+| Metric | 说明 |
+|---|---|
+| `root_cause_hit_rate` | 主因分类是否命中预期 |
+| `tool_selection_accuracy` | 是否选择指标、日志、runbook 等必要工具 |
+| `evidence_citation_rate` | 是否返回 runbook 来源 chunk |
+| `safe_action_rate` | 是否给出保守、安全的处理建议 |
+
 ## 错误处理
 
 当前已覆盖的错误分支：
@@ -377,6 +467,8 @@ failure_cases
 | `/agent/ask` 查询不存在的 collection | 404 |
 | `/agent/ask` LLM quota / request failed | 429 / 502 |
 | `/agent/evaluation` 空文档或非法 chunk 配置 | 400 |
+| `/oncall/diagnose` 不支持的 embedding / retrieval mode | 400 |
+| `/oncall/evaluation` 空文档或非法 chunk 配置 | 400 |
 
 ## 自动化验证
 
@@ -399,6 +491,8 @@ POST /agent/evaluation: intent/tool/refusal/source reliability metrics
 POST /evaluation: vector / bm25 / rrf / rerank
 POST /evaluation: custom evaluation cases
 POST /evaluation: failure cases
+POST /oncall/diagnose: cause ranking, trace, tools, and sources
+POST /oncall/evaluation: root cause/tool/evidence/safe action metrics
 missing collection -> 404
 unknown retrieval mode -> 400
 Teaching keyword retrieval metrics

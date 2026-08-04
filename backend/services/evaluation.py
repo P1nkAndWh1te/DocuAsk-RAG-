@@ -22,7 +22,33 @@ EVALUATION_CASES = [
     {"question": "RAG 的基本流程是什么？", "expected_top_chunk": 6},
     {"question": "RAG 为什么要先检索资料？", "expected_top_chunk": 6},
 ]
+ONCALL_EVALUATION_CASES = [
+    {"question": "API 5xx 错误率升高应该怎么排查？", "expected_top_chunk": 2},
+    {"question": "Redis 连接超时要看哪些指标？", "expected_top_chunk": 4},
+    {"question": "MySQL 慢查询告警怎么定位？", "expected_top_chunk": 6},
+    {"question": "CPU 使用率持续升高可能有哪些原因？", "expected_top_chunk": 7},
+    {"question": "磁盘空间不足应该先检查什么？", "expected_top_chunk": 8},
+    {"question": "OnCall 处理告警的通用原则是什么？", "expected_top_chunk": 9},
+]
 RETRIEVAL_MODES = {"vector", "bm25", "rrf", "rerank"}
+
+
+def select_evaluation_cases(document_text: str, requested_set: str) -> list[dict]:
+    if requested_set == "OnCall runbook":
+        return ONCALL_EVALUATION_CASES
+
+    if requested_set == "DocuAsk FAQ":
+        return EVALUATION_CASES
+
+    lowered_text = document_text.lower()
+    if (
+        "oncall" in lowered_text
+        or "runbook" in lowered_text
+        or "告警" in document_text
+    ):
+        return ONCALL_EVALUATION_CASES
+
+    return EVALUATION_CASES
 
 
 def evaluate_retrieval(

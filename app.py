@@ -25,15 +25,22 @@ from backend.services.embeddings import (
 )
 from backend.services.evaluation import (
     EVALUATION_CASES,
+    ONCALL_EVALUATION_CASES,
     RETRIEVAL_MODES,
     calculate_hit_rate,
     calculate_top_k_hit_rate,
     evaluate_retrieval,
     retrieve_for_mode,
+    select_evaluation_cases,
 )
 from backend.services.generation import (
     MissingApiKeyError,
     generate_answer_with_deepseek,
+)
+from backend.services.oncall import (
+    DEFAULT_ONCALL_EVALUATION_CASES,
+    evaluate_oncall_diagnosis,
+    run_oncall_diagnosis,
 )
 from backend.services.retrieval import format_retrieved_context
 
@@ -92,6 +99,11 @@ def main() -> None:
         index=sorted(AGENT_RETRIEVAL_MODES).index("auto"),
         help="Auto lets the agent choose a retrieval strategy based on the question intent.",
     )
+    evaluation_set = st.sidebar.selectbox(
+        "Evaluation set",
+        ["Auto", "DocuAsk FAQ", "OnCall runbook"],
+        help="Auto chooses FAQ or OnCall cases from the uploaded document content.",
+    )
 
     uploaded_file = st.file_uploader(
         "Upload a document",
@@ -143,12 +155,17 @@ def main() -> None:
         st.caption(
             "Run fixed questions to inspect which chunks are retrieved before LLM generation."
         )
+        evaluation_cases = select_evaluation_cases(document_text, evaluation_set)
         evaluation_rows = evaluate_retrieval(
-            EVALUATION_CASES,
+            evaluation_cases,
             chunks,
             top_k=TOP_K,
             embedding_mode=embedding_mode,
             retrieval_mode=retrieval_mode,
+        )
+        st.caption(
+            f"Evaluation cases: {len(evaluation_cases)} "
+            f"({'OnCall runbook' if evaluation_cases == ONCALL_EVALUATION_CASES else 'DocuAsk FAQ'})"
         )
         hit_rate = calculate_hit_rate(evaluation_rows)
         top_k_hit_rate = calculate_top_k_hit_rate(evaluation_rows)
@@ -173,6 +190,96 @@ def main() -> None:
         agent_metric_columns[2].metric("Refusal accuracy", f"{agent_evaluation['refusal_accuracy']:.0%}")
         agent_metric_columns[3].metric("Source rate", f"{agent_evaluation['source_citation_rate']:.0%}")
         st.dataframe(agent_evaluation["rows"], use_container_width=True, hide_index=True)
+
+        st.subheader("OnCall diagnosis lab")
+        st.caption(
+            "Use the uploaded runbook with structured alert fields, mock metrics, mock logs, "
+            "incident history, and retrieved runbook evidence."
+        )
+        with st.expander("Structured alert input", expanded=False):
+            col1, col2, col3 = st.columns(3)
+            alert_service = col1.text_input("Service", value="order-service")
+            alert_name = col2.text_input("Alert name", value="HighErrorRate")
+            alert_severity = col3.selectbox("Severity", ["P1", "P2", "P3"], index=0)
+            col4, col5, col6 = st.columns(3)
+            alert_metric = col4.text_input("Metric", value="http_5xx_rate")
+            alert_value = col5.text_input("Value", value="12%")
+            alert_duration = col6.text_input("Duration", value="5m")
+
+            oncall_submitted = st.button("Diagnose alert")
+
+        if oncall_submitted:
+            alert = {
+                "service": alert_service,
+                "alert_name": alert_name,
+                "severity": alert_severity,
+                "metric": alert_metric,
+                "value": alert_value,
+                "duration": alert_duration,
+            }
+            oncall_result = run_oncall_diagnosis(
+                alert=alert,
+                chunks=chunks,
+                embedding_mode=embedding_mode,
+                top_k=TOP_K,
+                retrieval_mode=retrieval_mode,
+            )
+
+            st.write(oncall_result["final_answer"])
+            oncall_columns = st.columns(3)
+            oncall_columns[0].metric("Primary cause", oncall_result["primary_cause"])
+            oncall_columns[1].metric("Confidence", oncall_result["confidence"])
+            oncall_columns[2].metric("Sources", oncall_result["sources"] or "none")
+
+            st.write("Selected tools:", ", ".join(oncall_result["selected_tools"]))
+            st.subheader("Mock evidence")
+            st.json(
+                {
+                    "metrics": oncall_result["metrics"],
+                    "logs": oncall_result["logs"],
+                    "incidents": oncall_result["incidents"],
+                    "possible_causes": oncall_result["possible_causes"],
+                }
+            )
+
+            st.subheader("OnCall trace")
+            st.dataframe(oncall_result["trace"], use_container_width=True, hide_index=True)
+
+            st.subheader("Runbook chunks")
+            for rank, item in enumerate(oncall_result["retrieved_chunks"], start=1):
+                score_label = format_score_label(item)
+                with st.expander(
+                    f"Rank {rank} | Chunk {item['chunk_index']} | {score_label}",
+                    expanded=rank == 1,
+                ):
+                    st.code(item["text"], language="markdown")
+
+        oncall_evaluation = evaluate_oncall_diagnosis(
+            DEFAULT_ONCALL_EVALUATION_CASES,
+            chunks,
+            embedding_mode=embedding_mode,
+            top_k=TOP_K,
+            retrieval_mode=retrieval_mode,
+        )
+        st.subheader("OnCall evaluation")
+        oncall_eval_columns = st.columns(4)
+        oncall_eval_columns[0].metric(
+            "Root cause hit",
+            f"{oncall_evaluation['root_cause_hit_rate']:.0%}",
+        )
+        oncall_eval_columns[1].metric(
+            "Tool accuracy",
+            f"{oncall_evaluation['tool_selection_accuracy']:.0%}",
+        )
+        oncall_eval_columns[2].metric(
+            "Evidence rate",
+            f"{oncall_evaluation['evidence_citation_rate']:.0%}",
+        )
+        oncall_eval_columns[3].metric(
+            "Safe action",
+            f"{oncall_evaluation['safe_action_rate']:.0%}",
+        )
+        st.dataframe(oncall_evaluation["rows"], use_container_width=True, hide_index=True)
 
     question = st.text_area(
         "Question",

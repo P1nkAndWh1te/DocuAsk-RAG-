@@ -1,12 +1,13 @@
 # DocuAsk
 
-DocuAsk is a local Agentic RAG document QA system built around a Retrieval-Augmented Generation pipeline:
+DocuAsk is a local Agentic RAG document QA system built around a Retrieval-Augmented Generation pipeline. It also includes an OnCall diagnosis lab for runbook-based alert analysis:
 
 ```text
 document upload -> chunking -> embedding -> intent routing -> tool selection -> retrieval/rerank -> answer/fallback -> source citations
+structured alert -> mock metrics/logs/incidents -> runbook retrieval -> cause ranking -> safe action plan
 ```
 
-The application uses Streamlit for the UI, FastAPI for reusable backend endpoints, Chroma for local vector storage, BGE for Chinese embedding, BM25/RRF/rerank for retrieval comparison, a lightweight Agentic RAG planner for intent routing and tool selection, and DeepSeek through an OpenAI-compatible LLM API.
+The application uses Streamlit for the UI, FastAPI for reusable backend endpoints, Chroma for local vector storage, BGE for Chinese embedding, BM25/RRF/rerank for retrieval comparison, a lightweight Agentic RAG planner for intent routing and tool selection, mock observability tools for OnCall diagnosis, and DeepSeek through an OpenAI-compatible LLM API.
 
 ## Highlights
 
@@ -19,6 +20,8 @@ The application uses Streamlit for the UI, FastAPI for reusable backend endpoint
 - Generate grounded answers with source chunk citations.
 - Evaluate retrieval quality with Top-1 hit and Top-k recall.
 - Evaluate Agentic behavior with intent accuracy, tool selection accuracy, refusal accuracy, and source citation rate.
+- Diagnose structured OnCall alerts with mock metrics, logs, incident history, runbook retrieval, cause ranking, trace, and safe action suggestions.
+- Evaluate OnCall diagnosis with root cause hit rate, tool selection accuracy, evidence citation rate, and safe action rate.
 - Expose reusable FastAPI endpoints for ingestion, QA, answer generation, and evaluation.
 - Record retrieval failure cases during evaluation.
 - Cover core API behavior, document parsing, retrieval metrics, and error branches with pytest.
@@ -30,6 +33,8 @@ The application uses Streamlit for the UI, FastAPI for reusable backend endpoint
 - 项目详细介绍：`PROJECT_DETAILED_GUIDE.md`
 - 简历与面试摘要：`PORTFOLIO_SUMMARY.md`
 - 交付验收清单：`DELIVERY_CHECKLIST.md`
+- OnCall 升级报告：`ONCALL_UPGRADE_REPORT.md`
+- 项目开发复盘：`PROJECT_DEVELOPMENT_REVIEW.md`
 - API 文档：`API.md`
 - 架构说明：`ARCHITECTURE.md`
 
@@ -49,6 +54,8 @@ The application uses Streamlit for the UI, FastAPI for reusable backend endpoint
 - python-docx
 - BM25
 - RRF
+- Agentic Workflow
+- Mock Metrics / Mock Logs / Mock Incidents
 
 ## 运行方式
 
@@ -88,7 +95,7 @@ python -m pytest -q
 当前验证结果：
 
 ```text
-32 passed, 1 warning
+36 passed, 1 warning
 ```
 
 ## DeepSeek API Key
@@ -118,6 +125,7 @@ python -c "import os; print('set' if os.environ.get('DEEPSEEK_API_KEY') else 'mi
 
 ```text
 examples/rag_faq.md
+examples/oncall_runbook.md
 ```
 
 可测试问题：
@@ -130,6 +138,17 @@ API Key 为什么不能写进代码？
 DeepSeek API 怎么配置？
 总结这份文档
 今天上海天气怎么样？
+```
+
+OnCall runbook 可测试问题：
+
+```text
+API 5xx 错误率升高应该怎么排查？
+Redis 连接超时要看哪些指标？
+MySQL 慢查询告警怎么定位？
+CPU 使用率持续升高可能有哪些原因？
+磁盘空间不足应该先检查什么？
+OnCall 处理告警的通用原则是什么？
 ```
 
 ## 检索评测结果

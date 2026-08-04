@@ -13,6 +13,11 @@ DOCUASK_BACKEND_FAQ_PATH = (
     / "examples"
     / "docuask_backend_faq.md"
 )
+ONCALL_RUNBOOK_PATH = (
+    APP_ROOT
+    / "examples"
+    / "oncall_runbook.md"
+)
 
 if str(APP_ROOT) not in sys.path:
     sys.path.insert(0, str(APP_ROOT))

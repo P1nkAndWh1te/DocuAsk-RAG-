@@ -4,10 +4,10 @@
 
 ## 当前定位
 
-DocuAsk 是一个本地文档 Agentic RAG 问答系统原型，当前结构为：
+DocuAsk 是一个本地文档 Agentic RAG 问答系统原型，并新增了面向运维 runbook 的 OnCall 诊断实验链路。当前结构为：
 
 ```text
-Streamlit UI + FastAPI backend + file upload + reusable RAG services + Chroma persistent storage + agent planner + tool selection + rerank + LLM answer generation + retrieval evaluation
+Streamlit UI + FastAPI backend + file upload + reusable RAG services + Chroma persistent storage + agent planner + tool selection + rerank + OnCall mock tools + LLM answer generation + retrieval evaluation
 ```
 
 当前重点解决三个问题：
@@ -16,6 +16,7 @@ Streamlit UI + FastAPI backend + file upload + reusable RAG services + Chroma pe
 - 检索质量需要可量化评估。
 - RAG 核心逻辑需要从页面中拆出，便于复用和测试。
 - 问答流程需要具备 intent routing、tool selection、trace、轻量多轮上下文和拒答边界。
+- 运维告警诊断需要结合 runbook、指标、日志、历史事件和安全动作边界。
 
 ## 模块结构
 
@@ -40,6 +41,7 @@ docuask/
       errors.py
       logging_config.py
       evaluation.py
+      oncall.py
     storage/
       chroma_db_v2/       # local ignored runtime data
   tests/
@@ -71,6 +73,11 @@ flowchart TD
     K --> L["DeepSeek generation"]
     K --> A3["fallback / refusal"]
     J --> M["/evaluation metrics"]
+    O1["Structured alert"] --> O2["mock metrics / logs / incidents"]
+    O1 --> O3["runbook retrieval"]
+    O2 --> O4["cause ranking"]
+    O3 --> O4
+    O4 --> O5["safe action plan + trace"]
 ```
 
 说明：
@@ -80,8 +87,9 @@ flowchart TD
 - `rrf` 融合 vector ranking 和 BM25 ranking。
 - `rerank` 先召回候选 chunks，再做本地轻量重排。
 - Agentic mode 会先判断 intent，再选择 retrieval/rerank/summary/refusal 工具。
+- OnCall mode 会根据结构化告警查询 mock 指标、日志、历史事件，并检索 runbook 生成诊断建议。
 - Streamlit 页面当前负责用户交互。
-- FastAPI 后端当前负责文档入库、检索问答、Agentic ask、LLM answer 生成和检索评测。
+- FastAPI 后端当前负责文档入库、检索问答、Agentic ask、OnCall diagnosis、LLM answer 生成和检索评测。
 
 ## Service 边界
 
@@ -99,6 +107,7 @@ flowchart TD
 | `errors.py` | 统一错误码和错误响应结构 |
 | `logging_config.py` | 基础日志配置 |
 | `evaluation.py` | 固定 15 题检索评测，计算 Top-1 hit、Top-k recall 和 failure cases |
+| `oncall.py` | 结构化告警诊断、mock 指标/日志/历史事件、runbook 检索、原因排序和 OnCall evaluation |
 
 ## 接口边界
 
@@ -112,6 +121,8 @@ flowchart TD
 | `POST /agent/ask` | 执行 Agentic RAG：intent、tool selection、trace、fallback/refusal |
 | `POST /agent/evaluation` | 评估 Agentic 行为：intent、工具选择、拒答和来源引用 |
 | `POST /evaluation` | 用固定问题集评估检索模式，并记录 failure cases |
+| `POST /oncall/diagnose` | 根据结构化告警、mock 可观测数据和 runbook 生成诊断结果 |
+| `POST /oncall/evaluation` | 评估 OnCall 诊断：根因命中、工具选择、证据引用和安全动作 |
 
 `POST /evaluation` 默认使用 FAQ 15 题，也支持传入自定义 `evaluation_cases`，用于不同文档配置不同问题集。
 

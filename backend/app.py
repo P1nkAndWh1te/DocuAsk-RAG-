@@ -31,6 +31,11 @@ from backend.services.generation import (
     generate_answer_with_deepseek,
 )
 from backend.services.logging_config import get_logger
+from backend.services.oncall import (
+    DEFAULT_ONCALL_EVALUATION_CASES,
+    evaluate_oncall_diagnosis,
+    run_oncall_diagnosis,
+)
 from backend.services.rerank import rerank_chunks
 from backend.services.retrieval import (
     build_chunk_collection,
@@ -216,6 +221,88 @@ class EvaluationResponse(BaseModel):
     top_k_recall: float
     rows: list[EvaluationRow]
     failure_cases: list[EvaluationRow]
+
+
+class OnCallAlert(BaseModel):
+    service: str = Field(..., min_length=1)
+    alert_name: str = Field(..., min_length=1)
+    severity: str = Field(default="P2", min_length=1)
+    metric: str = Field(..., min_length=1)
+    value: str = Field(..., min_length=1)
+    duration: str = Field(..., min_length=1)
+
+
+class OnCallDiagnosisRequest(BaseModel):
+    text: str = Field(..., min_length=1)
+    alert: OnCallAlert
+    embedding_mode: str = KEYWORD_EMBEDDING_MODE
+    chunk_size: int = DEFAULT_CHUNK_SIZE
+    chunk_overlap: int = DEFAULT_CHUNK_OVERLAP
+    top_k: int = Field(default=3, ge=1, le=10)
+    retrieval_mode: str = "rerank"
+
+
+class OnCallCause(BaseModel):
+    cause: str
+    score: int
+    matched_signals: list[str]
+
+
+class OnCallDiagnosisResponse(BaseModel):
+    alert: dict
+    selected_tools: list[str]
+    metrics: dict[str, str]
+    logs: list[str]
+    incidents: list[str]
+    retrieved_chunks: list[RetrievedChunk]
+    sources: str
+    possible_causes: list[OnCallCause]
+    primary_cause: str
+    confidence: str
+    final_answer: str
+    trace: list[AgentTraceStep]
+
+
+class OnCallEvaluationCase(BaseModel):
+    alert: OnCallAlert
+    expected_primary_cause: str = Field(..., min_length=1)
+    expected_tools: list[str]
+
+
+class OnCallEvaluationRequest(BaseModel):
+    text: str = Field(..., min_length=1)
+    embedding_mode: str = KEYWORD_EMBEDDING_MODE
+    chunk_size: int = DEFAULT_CHUNK_SIZE
+    chunk_overlap: int = DEFAULT_CHUNK_OVERLAP
+    top_k: int = Field(default=3, ge=1, le=10)
+    retrieval_mode: str = "rerank"
+    evaluation_cases: list[OnCallEvaluationCase] | None = None
+
+
+class OnCallEvaluationRow(BaseModel):
+    alert_name: str
+    service: str
+    expected_primary_cause: str
+    actual_primary_cause: str
+    cause_hit: bool
+    tool_hit: bool
+    has_sources: bool
+    safe_action: bool
+    confidence: str
+    selected_tools: str
+
+
+class OnCallEvaluationResponse(BaseModel):
+    embedding_mode: str
+    retrieval_mode: str
+    chunk_count: int
+    case_count: int
+    root_cause_hit_rate: float
+    tool_selection_accuracy: float
+    evidence_citation_rate: float
+    safe_action_rate: float
+    rows: list[OnCallEvaluationRow]
+    failure_cases: list[OnCallEvaluationRow]
 
 
 app = FastAPI(
@@ -580,4 +667,114 @@ def evaluate_document(request: EvaluationRequest) -> EvaluationResponse:
         top_k_recall=calculate_top_k_hit_rate(rows),
         rows=[EvaluationRow(**row) for row in rows],
         failure_cases=[EvaluationRow(**row) for row in get_failure_cases(rows)],
+    )
+
+
+@app.post("/oncall/diagnose", response_model=OnCallDiagnosisResponse)
+def diagnose_oncall_alert(request: OnCallDiagnosisRequest) -> OnCallDiagnosisResponse:
+    validate_oncall_request(request.embedding_mode, request.retrieval_mode)
+    chunks = split_text_into_chunks_for_api(
+        request.text,
+        request.chunk_size,
+        request.chunk_overlap,
+    )
+    result = run_oncall_diagnosis(
+        alert=request.alert.model_dump(),
+        chunks=chunks,
+        embedding_mode=request.embedding_mode,
+        top_k=request.top_k,
+        retrieval_mode=request.retrieval_mode,
+    )
+
+    return build_oncall_diagnosis_response(result)
+
+
+@app.post("/oncall/evaluation", response_model=OnCallEvaluationResponse)
+def evaluate_oncall_alerts(request: OnCallEvaluationRequest) -> OnCallEvaluationResponse:
+    validate_oncall_request(request.embedding_mode, request.retrieval_mode)
+    chunks = split_text_into_chunks_for_api(
+        request.text,
+        request.chunk_size,
+        request.chunk_overlap,
+    )
+    evaluation_cases = (
+        [case.model_dump() for case in request.evaluation_cases]
+        if request.evaluation_cases is not None
+        else DEFAULT_ONCALL_EVALUATION_CASES
+    )
+    result = evaluate_oncall_diagnosis(
+        evaluation_cases=evaluation_cases,
+        chunks=chunks,
+        embedding_mode=request.embedding_mode,
+        top_k=request.top_k,
+        retrieval_mode=request.retrieval_mode,
+    )
+
+    return OnCallEvaluationResponse(
+        embedding_mode=request.embedding_mode,
+        retrieval_mode=request.retrieval_mode,
+        chunk_count=len(chunks),
+        case_count=result["case_count"],
+        root_cause_hit_rate=result["root_cause_hit_rate"],
+        tool_selection_accuracy=result["tool_selection_accuracy"],
+        evidence_citation_rate=result["evidence_citation_rate"],
+        safe_action_rate=result["safe_action_rate"],
+        rows=[OnCallEvaluationRow(**row) for row in result["rows"]],
+        failure_cases=[OnCallEvaluationRow(**row) for row in result["failure_cases"]],
+    )
+
+
+def validate_oncall_request(embedding_mode: str, retrieval_mode: str) -> None:
+    if embedding_mode not in COLLECTION_NAMES:
+        raise_http_error(400, ErrorCode.UNSUPPORTED_EMBEDDING_MODE, "unsupported embedding mode")
+
+    if retrieval_mode not in RETRIEVAL_MODES:
+        raise_http_error(400, ErrorCode.UNSUPPORTED_RETRIEVAL_MODE, "unsupported retrieval mode")
+
+
+def split_text_into_chunks_for_api(
+    text: str,
+    chunk_size: int,
+    chunk_overlap: int,
+) -> list[str]:
+    try:
+        chunks = split_text_into_chunks(
+            text,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+    except ValueError as exc:
+        raise_http_error(400, ErrorCode.INVALID_CHUNKING_CONFIG, str(exc))
+
+    if not chunks:
+        raise_http_error(400, ErrorCode.EMPTY_DOCUMENT, "document text is empty")
+
+    return chunks
+
+
+def build_oncall_diagnosis_response(result: dict) -> OnCallDiagnosisResponse:
+    return OnCallDiagnosisResponse(
+        alert=result["alert"],
+        selected_tools=result["selected_tools"],
+        metrics=result["metrics"],
+        logs=result["logs"],
+        incidents=result["incidents"],
+        retrieved_chunks=[
+            RetrievedChunk(
+                chunk_index=item["chunk_index"],
+                text=item["text"],
+                distance=item.get("distance"),
+                score=item.get("score"),
+                rrf_score=item.get("rrf_score"),
+                rerank_score=item.get("rerank_score"),
+                scan_score=item.get("scan_score"),
+            )
+            for item in result["retrieved_chunks"]
+        ],
+        sources=result["sources"],
+        possible_causes=[OnCallCause(**item) for item in result["possible_causes"]],
+        primary_cause=result["primary_cause"],
+        confidence=result["confidence"],
+        final_answer=result["final_answer"],
+        trace=[AgentTraceStep(**item) for item in result["trace"]],
     )

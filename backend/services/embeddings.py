@@ -34,6 +34,11 @@ CONCEPTS = {
     "chroma": ["chroma", "向量数据库", "存储", "查找", "相似"],
     "llamaindex": ["llamaindex", "索引"],
     "deepseek": ["deepseek", "deepseek_api_key", "大模型", "llm", "openai sdk"],
+    "oncall": ["oncall", "告警", "值班", "排查", "runbook", "故障", "证据"],
+    "metrics": ["指标", "cpu", "qps", "latency", "error_rate", "http_5xx_rate", "磁盘"],
+    "logs": ["日志", "error", "timeout", "connection refused", "慢查询", "堆栈"],
+    "redis": ["redis", "连接池", "大 key", "主从切换", "pool exhausted"],
+    "mysql": ["mysql", "sql", "explain", "索引", "全表扫描", "ddl"],
 }
 
 

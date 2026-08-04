@@ -63,7 +63,6 @@ def get_chunks_from_collection(collection_name: str) -> list[str] | None:
 def build_chunk_collection(chunks: list[str], embedding_mode: str):
     client = get_chroma_client()
     collection_name = get_collection_name(chunks, embedding_mode)
-    collection = get_chunk_collection(client, collection_name)
 
     embedded_chunks = []
     for index, chunk in enumerate(chunks, start=1):
@@ -74,9 +73,12 @@ def build_chunk_collection(chunks: list[str], embedding_mode: str):
     if not embedded_chunks:
         return None
 
-    if collection.count() != 0:
+    try:
         client.delete_collection(collection_name)
-        collection = get_chunk_collection(client, collection_name)
+    except NotFoundError:
+        pass
+
+    collection = get_chunk_collection(client, collection_name)
 
     ids = [f"chunk-{index}" for index, _, _ in embedded_chunks]
     documents = [chunk for _, chunk, _ in embedded_chunks]

@@ -4,7 +4,7 @@ from docx import Document
 
 from backend.app import app
 from backend.services.embeddings import KEYWORD_EMBEDDING_MODE
-from conftest import DOCUASK_BACKEND_FAQ_PATH, FAQ_PATH
+from conftest import DOCUASK_BACKEND_FAQ_PATH, FAQ_PATH, ONCALL_RUNBOOK_PATH
 
 
 def test_documents_endpoint_indexes_faq_document():
@@ -542,3 +542,64 @@ def test_evaluation_endpoint_returns_400_for_unknown_retrieval_mode():
     )
 
     assert response.status_code == 400
+
+
+def test_oncall_diagnose_endpoint_returns_cause_trace_and_sources():
+    client = TestClient(app)
+    text = ONCALL_RUNBOOK_PATH.read_text(encoding="utf-8")
+
+    response = client.post(
+        "/oncall/diagnose",
+        json={
+            "text": text,
+            "embedding_mode": KEYWORD_EMBEDDING_MODE,
+            "chunk_size": 350,
+            "chunk_overlap": 50,
+            "top_k": 3,
+            "retrieval_mode": "rerank",
+            "alert": {
+                "service": "order-service",
+                "alert_name": "HighErrorRate",
+                "severity": "P1",
+                "metric": "http_5xx_rate",
+                "value": "12%",
+                "duration": "5m",
+            },
+        },
+    )
+
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["primary_cause"] == "recent_deploy_or_dependency_failure"
+    assert "query_metrics" in payload["selected_tools"]
+    assert "retrieve_runbook" in payload["selected_tools"]
+    assert payload["sources"]
+    assert payload["retrieved_chunks"]
+    assert payload["trace"][0]["step"] == "parse_alert"
+
+
+def test_oncall_evaluation_endpoint_returns_reliability_metrics():
+    client = TestClient(app)
+    text = ONCALL_RUNBOOK_PATH.read_text(encoding="utf-8")
+
+    response = client.post(
+        "/oncall/evaluation",
+        json={
+            "text": text,
+            "embedding_mode": KEYWORD_EMBEDDING_MODE,
+            "chunk_size": 350,
+            "chunk_overlap": 50,
+            "top_k": 3,
+            "retrieval_mode": "rerank",
+        },
+    )
+
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["case_count"] == 4
+    assert payload["root_cause_hit_rate"] >= 0.75
+    assert payload["tool_selection_accuracy"] == 1.0
+    assert payload["evidence_citation_rate"] == 1.0
+    assert payload["safe_action_rate"] == 1.0
